@@ -20,6 +20,24 @@ display.setStatusBar( display.HiddenStatusBar )
 require( "sprite" )
 
 
+local alien_hoard_array = {}
+
+-----------------------------------------------------------------------------------------
+-- Set up level 
+-----------------------------------------------------------------------------------------
+local function setup_level()
+	alien_hoard_array = {4,4,4,4, 11,11,11,11, 15,15,15,15}
+end
+setup_level()
+-----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
 --------------------------------------------------------------------------------
 -- set up rcorona
 -- Use this to test with a real device sending accelerometer data to the simulator
@@ -82,7 +100,20 @@ sprite.add( ship_set, "ship", 1, 5, 1000, 0 )
 local missile_sheet = sprite.newSpriteSheet( "missile_1.png", 6, 22 )
 local missile_set = sprite.newSpriteSet( missile_sheet, 1, 1 )
 sprite.add( missile_set, "missile", 1, 1, 1000, 0 )
+
+local bomb_sheet = sprite.newSpriteSheet( "bomb.png", 3, 4 )
+local bomb_set = sprite.newSpriteSet( bomb_sheet, 1, 1 )
+sprite.add( bomb_set, "bomb", 1, 1, 1000, 0 )
 -----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
 
 
 
@@ -119,6 +150,42 @@ end
 
 
 
+
+
+-----------------------------------------------------------------------------------------
+-- Make Bombs
+-----------------------------------------------------------------------------------------
+local bomb_array = {}
+
+local function remove_bomb( bomb )
+	transition.cancel( bomb.transition )
+	bomb:removeSelf()
+end 
+
+local function make_bomb( x, y ) 
+	local bomb = sprite.newSprite( bomb_set )
+	
+	bomb.x = x
+	bomb.y = y 
+	
+	print( ">>>> Bomb y:", y  )
+	
+	bomb.transition = transition.to( bomb, {y=y+480, time=2000, onComplete=remove_bomb} )
+	
+	table.insert( bomb_array, bomb ) 
+	
+	return bomb 
+end 
+-----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
 -----------------------------------------------------------------------------------------
 -- Make aliens
 -----------------------------------------------------------------------------------------
@@ -127,50 +194,40 @@ local alien_array = {}
 local touch_alien
 
 local function remove_alien( alien )
-
 	local transitions = alien.transitions
 	for i = 1, #transitions, 1 do 
 		transition.cancel( transitions[i] )
 	end 
-
+	
 	local index = table.indexOf( alien_array, alien )
 	
-	print( "--", alien, index, #alien_array )
-	
+	timer.cancel( alien.bomb_timer )
 	table.remove( alien_array, index )
-	alien:removeEventListener( "touch", touch_alien )
 	alien:removeSelf()
 end 
 
-function touch_alien( event ) 
-	local phase = event.phase 
-	if phase == "began" then 
-		local alien = event.target
-		local explosion =  make_explosion( alien.x, alien.y )
-		
-		local transitions = alien.transitions
-		for i = 1, #transitions, 1 do 
-			transition.cancel( transitions[i] )
-		end 
-		
-		local index = table.indexOf( alien_array, alien )
-		table.remove( alien_array, index )
-		alien:removeEventListener( "touch", remove_alien )
-		alien:removeSelf()
-	end 
-end 
 
 local function alien_complete( target ) 
 	local alien = target
 	local index = table.indexOf( alien_array, alien )
+	timer.cancel( alien.bomb_timer )
 	table.remove ( alien_array, index )
-	alien:removeEventListener( "touch", touch_alien )
 	alien:removeSelf()
 end 
 
 local function make_alien()
-	local alien = sprite.newSprite( alien_set )
-	alien.currentFrame = math.random( 1, 25 )
+	local alien
+	
+	if #alien_hoard_array > 0 then 
+		local f = alien_hoard_array[1]
+		table.remove( alien_hoard_array, 1 )
+		alien = sprite.newSprite( alien_set )
+		alien.currentFrame = f
+	else 
+		print( "game over" )
+		return 
+	end
+	
 	alien.x = 32
 	alien.y = -32
 	local transition_time = math.random( 5000, 10000 )
@@ -183,12 +240,40 @@ local function make_alien()
 	table.insert( transitions, transition.to( alien, {y=end_y, time=1400, delay=4400, onComplete=alien_complete} ) )
 	
 	alien.transitions = transitions
-	alien:addEventListener( "touch", touch_alien )
 	table.insert( alien_array, alien )
+	
+	local function create_timer_callback( alien )
+		local alien = alien
+		return function()
+			make_bomb( alien.x, alien.y )
+		end
+	end
+	
+	local bomb_delay = math.random(1000, 2000)
+	
+	alien.bomb_timer = timer.performWithDelay( bomb_delay, create_timer_callback( alien ), -1 )
+	
 end 
 
-local timer = timer.performWithDelay( 1000, make_alien, -1 )
+local alien_timer = timer.performWithDelay( 1000, make_alien, -1 )
 -----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -230,7 +315,7 @@ local function on_accelerometer( event )
 	end 
 end
 
-local function on_enterFrame( event ) 
+local function move_ship() 
 	ship.x = ship.x + vx
 	
 	vx_text.text = math.round( vx )
@@ -257,7 +342,6 @@ local function on_enterFrame( event )
 end 
 
 Runtime:addEventListener( "accelerometer", on_accelerometer )
-Runtime:addEventListener( "enterFrame", on_enterFrame )
 -----------------------------------------------------------------------------------------
 
 
@@ -283,9 +367,10 @@ local function remove_missile( missile )
 end 
 
 
-local function on_frame( event ) 
-	missile_text.text = #missile_array .. " " .. #alien_array
-	
+
+
+
+local function check_missile_collision()
 	for m = 1, #missile_array, 1 do 
 		for a = 1, #alien_array, 1 do 
 			
@@ -314,12 +399,25 @@ local function on_frame( event )
 			end
 		end 
 	end 
+end
+
+
+local function drop_bomb()
+	local alien = alien_array[ math.random( #alien_array )]
+	print( "***** ", alien )
+	make_bomb( alien.x, alien.y )
+end 
+
+-- local bomb_timer = timer.performWithDelay( 1200, drop_bomb, -1 )
+
+local function on_frame( event ) 
+	missile_text.text = #missile_array .. " " .. #alien_array
 	
+	check_missile_collision()
+	move_ship()
 end 
 
 Runtime:addEventListener( "enterFrame", on_frame )
-
-
 
 local function make_missile( x, y )
 	local missile = sprite.newSprite( missile_set )
@@ -330,7 +428,6 @@ local function make_missile( x, y )
 	table.insert( missile_array, missile )
 end 
 
-
 local function on_touch( event ) 
 	local phase = event.phase 
 	if phase == "began" then 
@@ -339,7 +436,18 @@ local function on_touch( event )
 end 
 
 Runtime:addEventListener( "touch", on_touch )
+
+
 -----------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
 
 
 

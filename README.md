@@ -1,4 +1,4 @@
 space-madness
 =============
 
-Corona Space Battle Game
+Corona Space battle game. 
